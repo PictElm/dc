@@ -1,46 +1,70 @@
+--- utils
+mapFst :: (a -> c) -> (a, b) -> (c, b)
+mapFst = uncurry . (.) (,)
 
+mapSnd :: (b -> d) -> (a, b) -> (a, d)
+mapSnd = fmap
+
+mayHead :: [a] -> Maybe a
+mayHead = foldr (const . Just) Nothing
+
+--- calculator
 data Item
   = Str String
   | Num Integer
-  deriving (Show)
+  deriving (Show, Eq)
 
 type Stack = [Item]
 -- type Registers = Map Char Stack
 
 type State = (Stack)
 
--- State -> String -> Num Integer
+type Action = State -> State
 
--- String -> List Char -> (String -> a) -> (a, String)
--- "123 52+"
---     ^
-
+--- parser
 data Token
   = Val Item
-  | Op String
-  deriving (Show)
+  | Op String --Action
+  deriving (Show, Eq)
 
+type Lexer = Input -> Maybe (Token, Rest)
 
 type Accepts = [Char]
 type Input = String
 type Output = String
 type Rest = String
 
-map2 :: (a -> b -> (c, d)) -> (a, b) -> (c, d)
-map2 = uncurry
+mayProcess :: (Output -> Token) -> (String, Rest) -> Maybe (Token, Rest)
+mayProcess = flip $ flip (fmap . mapFst)
+           -- YYY: could do a `mayIf :: p -> a -> Maybe a`
+           . mayHead
+           . takeWhile (not . null . fst)
+           . replicate 1
 
-applyFst :: (a -> c) -> a -> d -> (c, d)
-applyFst = (.) (,)
+mkLex :: Accepts -> (Output -> Token) -> Lexer
+mkLex = flip ((.) . mayProcess) . span . flip elem
 
-mapFst :: (a -> c) -> (a, b) -> (c, b)
-mapFst = map2 . applyFst
+lexNum = mkLex "1234567890" (Val . Num . read)
+lexAdd = mkLex ['+'] (const (Op "add"))
+lexSub = mkLex ['-'] (const (Op "sub"))
 
-mkLex :: Accepts -> (Output -> Token) -> Input -> (Token, Rest)
-mkLex = flip ((.) . mapFst) . span . flip elem
+next :: Input -> (Token, Rest)
+next s = maybe (error "unexpected token smth here") id
+         (head $ dropWhile (== Nothing) -- XXX: will ignore the last token
+           [ lexNum s
+           , lexAdd s
+           , lexSub s
+           ]) -- TODO: inside out
+-- head $ dropWhile (== Nothing) (map ($) lexers s)
 
--- lexAdd = mkLex '+' (\_ -> "add-op")
--- lexSub = mkLex '-' (\_ -> "sub-op")
+does :: Token -> Action
+does = const id
 
--- next :: String -> (Token, String)
--- next c::rest | c == '_'  = (Val Int 2, rest)
---              | otherwise = (Val Int 1, rest)
+parse :: Input -> [Action]
+parse = map (does . fst)
+      . takeWhile (not . null . snd)
+      . iterate (next . snd)
+      . (,) (Op "init") -- YYY: remove or make use of
+
+--- entry point
+--main and such
