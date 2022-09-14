@@ -8,6 +8,10 @@ mapSnd = fmap
 mayHead :: [a] -> Maybe a
 mayHead = foldr (const . Just) Nothing
 
+duple :: a -> (a, a)
+duple = (mapSnd head . mapFst head)
+      . (splitAt 1 . replicate 2)
+
 --- calculator
 data Item
   = Str String
@@ -34,7 +38,7 @@ type Input = String
 type Output = String
 type Rest = String
 
-mayProcess :: (Output -> Token) -> (String, Rest) -> Maybe (Token, Rest)
+mayProcess :: (Output -> Token) -> (Output, Rest) -> Maybe (Token, Rest)
 mayProcess = flip $ flip (fmap . mapFst)
            -- YYY: could do a `mayIf :: p -> a -> Maybe a`
            . mayHead
@@ -47,24 +51,33 @@ mkLex = flip ((.) . mayProcess) . span . flip elem
 lexNum = mkLex "1234567890" (Val . Num . read)
 lexAdd = mkLex ['+'] (const (Op "add"))
 lexSub = mkLex ['-'] (const (Op "sub"))
+lexers =
+  [ lexNum
+  , lexAdd
+  , lexSub
+  ]
 
 next :: Input -> (Token, Rest)
-next s = maybe (error "unexpected token smth here") id
-         (head $ dropWhile (== Nothing) -- XXX: will ignore the last token
-           [ lexNum s
-           , lexAdd s
-           , lexSub s
-           ]) -- TODO: inside out
--- head $ dropWhile (== Nothing) (map ($) lexers s)
+next = maybe undefined id -- unreachable (because of `dropWhile`)
+     . maybe (error "unexpected token smth here") id
+     . mayHead
+     . dropWhile (== Nothing)
+     . (flip pam) lexers
+     where pam = map . flip ($)
 
 does :: Token -> Action
 does = const id
 
 parse :: Input -> [Action]
-parse = map (does . fst)
-      . takeWhile (not . null . snd)
+parse = map (does . fst . snd)
+      . takeWhile (not . null . snd . fst)
+      . zip1Off
       . iterate (next . snd)
-      . (,) (Op "init") -- YYY: remove or make use of
+      . (,) undefined
+      where zip1Off = uncurry (flip zip . drop 1) . duple
+
+exec :: [Action] -> Action
+exec = foldl1 (flip (.))
 
 --- entry point
 --main and such
