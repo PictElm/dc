@@ -96,7 +96,7 @@ mkLexComplex x fr = fmap (mkSureLexComplex fr)
                   . mayIfStarts x
 mkSureLexComplex :: (Char -> Token) -> Input -> (Token, Rest)
 mkSureLexComplex fr = mapBoth t . duple
-                    where t = ( (|.) (head . drop 1) fr
+                    where t = ( (. head . drop 1) fr
                               , drop 2
                               ) -- TODO: mapFst
 mayIfStarts :: Char -> Input -> Maybe Input
