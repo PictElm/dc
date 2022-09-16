@@ -1,14 +1,12 @@
 --- utils
 (|.) = flip (.)
+(|$) = flip ($)
 
 mapFst :: (a -> c) -> (a, b) -> (c, b)
 mapFst = uncurry . (.) (,)
 
 mapSnd :: (b -> d) -> (a, b) -> (a, d)
 mapSnd = fmap
-
-mayHead :: [a] -> Maybe a
-mayHead = foldr (const . Just) Nothing
 
 duple :: a -> (a, a)
 duple = (mapSnd head . mapFst head)
@@ -22,6 +20,22 @@ mapBoth = ($$) (flip . (flip x .) . y)
         where
           x = mapFst . fst
           y = mapSnd . snd
+
+mapBothFstBin :: (t -> a -> c, b -> d) -> t -> (a, b) -> (c, d)
+mapBothFstBin = (.) mapBoth . flip (mapFst . (|$))
+
+mapBothSndBin :: (a -> c, t -> b -> d) -> t -> (a, b) -> (c, d)
+mapBothSndBin = (.) mapBoth . flip (mapSnd . (|$))
+
+mayHead :: [a] -> Maybe a
+mayHead = foldr (const . Just) Nothing
+
+mayIfStarts :: Char -> Input -> Maybe Input
+mayIfStarts = (|.) duple . (.) (uncurry fmap)
+            . mapBothSndBin (const , (mayHead .) . takeWhile . (==))
+
+sure :: Maybe a -> a
+sure = maybe undefined id
 
 --- calculator
 data Item
@@ -87,29 +101,26 @@ lexnt = const (Just (Op "nop", ""))
 mkLexSimple :: Char -> Token -> Lexer
 mkLexSimple x t = mkLexLong (==x) (const False) (const t)
 
+mkSureLexComplex :: (Char -> Token) -> Input -> (Token, Rest)
+mkSureLexComplex = (|.) duple
+                 . mapBothFstBin ((. head . drop 1) , drop 2)
+
 mkLexComplex :: Char -> (Char -> Token) -> Lexer
 -- mkLexComplex x fr = \i ->
 --                       if x == head i
 --                         then Just (fr (head (drop 1 i)), drop 2 i)
 --                         else Nothing
-mkLexComplex x fr = fmap (mkSureLexComplex fr)
-                  . mayIfStarts x
-mkSureLexComplex :: (Char -> Token) -> Input -> (Token, Rest)
-mkSureLexComplex fr = mapBoth t . duple
-                    where t = ( (. head . drop 1) fr
-                              , drop 2
-                              ) -- TODO: mapFst
-mayIfStarts :: Char -> Input -> Maybe Input
-mayIfStarts x = uncurry fmap . mapBoth t . duple
-              where t = ( const
-                        , ( (mayHead .) . takeWhile . (==) ) x
-                        ) -- TODO: mapSnd
+-- mkLexComplex x fr = (fmap . mkSureLexComplex) fr . (mayIfStarts x)
+mkLexComplex = (|.) (fmap . mkSureLexComplex) . (|.) . mayIfStarts
 
 mkLexComplex2 :: Char -> Char -> (Char -> Token) -> Lexer
-mkLexComplex2 y x fr = \i ->
-                         if y == head i
-                           then (mkLexComplex x fr) (drop 1 i)
-                           else Nothing
+-- mkLexComplex2 y x fr = \i ->
+--                          if y == head i
+--                            then (mkLexComplex x fr) (drop 1 i)
+--                            else Nothing
+-- mkLexComplex2 y x fr = \i -> fmap (sure . mkLexComplex x fr . drop 1) (mayIfStarts y i)
+-- mkLexComplex2 = (|.) mkLexComplex . (.) . (|.) (fmap . (.) sure . (drop 1 |.)) . (|.) . mayIfStarts
+mkLexComplex2 = (mkLexComplex |.) . (.) . (. (=<<)) . (|.) . mayIfStarts -- crap, missed the `drop 1`
 
 mkLexLong :: (Char -> Bool) -> (Char -> Bool) -> ([Char] -> Token) -> Lexer
 mkLexLong pb pc fc = \i ->
@@ -120,7 +131,6 @@ mkLexLong pb pc fc = \i ->
                              (o, r) = span pc (drop 1 i)
                            in Just (fc (c:o), r)
                          else Nothing
--- mkLexLong ~= ..?
 
 
 lexAdd = mkLexSimple '+' (Op "add")
@@ -145,12 +155,12 @@ lexers =
   ]
 
 next :: Input -> (Token, Rest)
-next = maybe undefined id -- unreachable (because of `dropWhile`)
+next = sure -- ok because of `dropWhile`
      . maybe (error "unexpected token smth here") id
      . mayHead
      . dropWhile (== Nothing)
      . (flip pam) lexers
-     where pam = map . flip ($)
+     where pam = map . (|$)
 
 does :: Token -> Token --Action
 does = id --const id
