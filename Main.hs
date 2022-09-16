@@ -74,6 +74,11 @@ type Rest = String
 mkLexSimple :: Char -> Token -> Lexer
 mkLexSimple = (. const) . flip mkLexLong (const False) . (==)
 
+-- mkLexSimple' :: [(Char, Token)] -> Lexer
+-- mkLexSimple' t = ((flip lookup) t =<<) . mayHead
+-- -- lexSimple = ((flip lookup) [('+', "add"), ('k', "spr")] =<<) . mayHead
+-- lexSimple = mkLexSimple' [('+', "add"), ('k', "spr")]
+
 mkSureLexComplex :: (Char -> Token) -> SureLexer
 mkSureLexComplex = (. duple)
                  . mapBothFstBin ((. head . drop 1), drop 2)
