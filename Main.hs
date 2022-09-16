@@ -48,7 +48,7 @@ type Stack = [Item]
 
 type State = (Stack)
 -- type MacroStack = [Action]
--- type State = (Stack, RegisterMap, MacroStack)
+-- type State = (Params, Stack, RegisterMap, MacroStack)
 
 type Action = State -> State
 
@@ -107,7 +107,7 @@ mkSureLexLong = (. f) . g
 mkLexLong :: (Char -> Bool) -> (Char -> Bool) -> (Output -> Token) -> Lexer
 mkLexLong = (. mkSureLexLong) . (.) . (. fmap) . (|.) . mayIfHead
 
-lexNum = (mkLexLong $$) (flip elem $ "1-9A-Z_") (Val . Num . read)
+lexNum = (mkLexLong $$) (flip elem $ "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_") (Val . Num . read)
 lexStr = mkLexLong (=='[') (/=']') (Val . Str . tail)
 lexSkip = (mkLexLong $$) (flip elem $ "\t\n\r ]") (const (Op "nop"))
 -- printing commands
@@ -215,7 +215,7 @@ lexers =
 
 next :: Input -> (Token, Rest)
 next = sure -- ok because of `dropWhile`
-     . maybe (error "unexpected token smth here") id
+     . maybe (error "unexpected token smth here") id -- YYY: again on craching is not the best
      . mayHead
      . dropWhile (== Nothing)
      . (flip pam) lexers
@@ -225,7 +225,7 @@ does :: Token -> Token --Action
 does = id --const id
 
 parse :: Input -> [Token] --[Action]
-parse = map (does . fst . fst)
+parse = map (does . fst . fst) -- YYY: filter nops somewhere
       . takeWhile (not . null . snd . snd)
       . zip1Off
       . iterate (next . snd)
@@ -234,3 +234,5 @@ parse = map (does . fst . fst)
 
 --- entry point
 --main and such
+main :: IO ()
+main = interact $ show . parse
