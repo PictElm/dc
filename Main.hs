@@ -43,8 +43,8 @@ sure = maybe undefined id
 
 --- calculator
 data Item
-  = Str String
-  | Num Integer --String
+  = Num Integer
+  | Str String
   deriving (Show, Eq)
 
 type Stack = [Item]
@@ -60,10 +60,7 @@ exec :: [Action] -> Action
 exec = foldl1 (|.)
 
 --- lexers/scanners/parsers
-data Token -- YYY: will probably Token = Action soon
-  = Val Item
-  | Op String --Action
-  deriving (Show, Eq)
+type Token = Maybe String --Action
 
 type Lexer = Input -> Maybe (Token, Rest)
 type SureLexer = Input -> (Token, Rest)
@@ -108,63 +105,63 @@ mkSingleLexLong = (. (. f) . g) . (.) . (. fmap) . (|.) . mayIfHead
                   g = (|.) . (. duple) . mapSnd . (. drop 1) . span
 
 lexAllSimple = mkMultipleLexSimple
-  [ ('p', (Op "pln"))
-  , ('n', (Op "nln"))
-  , ('P', (Op "pnt"))
-  , ('f', (Op "dmp"))
-  , ('+', (Op "add"))
-  , ('-', (Op "sub"))
-  , ('*', (Op "mul"))
-  , ('/', (Op "div"))
-  , ('%', (Op "rem"))
-  , ('~', (Op "quo"))
-  , ('^', (Op "exp"))
-  , ('|', (Op "mex"))
-  , ('v', (Op "srt"))
-  , ('c', (Op "clr"))
-  , ('d', (Op "dup"))
-  , ('r', (Op "swp"))
-  , ('R', (Op "rot"))
-  , ('i', (Op "sir"))
-  , ('o', (Op "sor"))
-  , ('k', (Op "spr"))
-  , ('I', (Op "gir"))
-  , ('O', (Op "gor"))
-  , ('K', (Op "gpr"))
-  , ('a', (Op "bla"))
-  , ('x', (Op "exc"))
-  , ('?', (Op "rdx"))
-  , ('q', (Op "qui"))
-  , ('Q', (Op "mqu"))
-  , ('Z', (Op "ndd"))
-  , ('X', (Op "nfd"))
-  , ('z', (Op "dpt"))
+  [ ('p', (Just "pln"))
+  , ('n', (Just "nln"))
+  , ('P', (Just "pnt"))
+  , ('f', (Just "dmp"))
+  , ('+', (Just "add"))
+  , ('-', (Just "sub"))
+  , ('*', (Just "mul"))
+  , ('/', (Just "div"))
+  , ('%', (Just "rem"))
+  , ('~', (Just "quo"))
+  , ('^', (Just "exp"))
+  , ('|', (Just "mex"))
+  , ('v', (Just "srt"))
+  , ('c', (Just "clr"))
+  , ('d', (Just "dup"))
+  , ('r', (Just "swp"))
+  , ('R', (Just "rot"))
+  , ('i', (Just "sir"))
+  , ('o', (Just "sor"))
+  , ('k', (Just "spr"))
+  , ('I', (Just "gir"))
+  , ('O', (Just "gor"))
+  , ('K', (Just "gpr"))
+  , ('a', (Just "bla"))
+  , ('x', (Just "exc"))
+  , ('?', (Just "rdx"))
+  , ('q', (Just "qui"))
+  , ('Q', (Just "mqu"))
+  , ('Z', (Just "ndd"))
+  , ('X', (Just "nfd"))
+  , ('z', (Just "dpt"))
   ]
 
 lexAllComplex = mkMultipleLexComplex
-  [ ('s', (Op . (flip (:) "#ser")))
-  , ('l', (Op . (flip (:) "#ger")))
-  , ('S', (Op . (flip (:) "#pur")))
-  , ('L', (Op . (flip (:) "#por")))
-  , ('>', (Op . (flip (:) "#gt")))
-  , ('<', (Op . (flip (:) "#lt")))
-  , ('=', (Op . (flip (:) "#eq")))
-  -- , (':', (Op . (flip (:) "#set")))
-  -- , (';', (Op . (flip (:) "#get")))
+  [ ('s', (Just . (flip (:) "#ser")))
+  , ('l', (Just . (flip (:) "#ger")))
+  , ('S', (Just . (flip (:) "#pur")))
+  , ('L', (Just . (flip (:) "#por")))
+  , ('>', (Just . (flip (:) "#gt")))
+  , ('<', (Just . (flip (:) "#lt")))
+  , ('=', (Just . (flip (:) "#eq")))
+  -- , (':', (Just . (flip (:) "#set")))
+  -- , (';', (Just . (flip (:) "#get")))
   ]
 
 lexAllComplex2 = mkMultipleLexComplex2
-  [ ('!', [ ('>', (Op . (flip (:) "#le")))
-          , ('<', (Op . (flip (:) "#ge")))
-          , ('=', (Op . (flip (:) "#ne")))
+  [ ('!', [ ('>', (Just . (flip (:) "#le")))
+          , ('<', (Just . (flip (:) "#ge")))
+          , ('=', (Just . (flip (:) "#ne")))
           ])
   ]
 
-lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (Val . Num . read)
-lexString = mkSingleLexLong (=='[') (/=']') (Val . Str . tail) -- FIXME: capture closing ']'
-lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const (Op "nop"))
-lexCommand = mkSingleLexLong (=='!') (/='\n') (const (Op "sh . drop first"))
-lexComment = mkSingleLexLong (=='#') (/='\n') (const (Op "nop"))
+lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (Just . ("pushNum " ++)) --(Val . Num . read)
+lexString = mkSingleLexLong (=='[') (/=']') (Just . ("pushStr " ++)) --(Val . Str . tail) -- FIXME: capture closing ']'
+lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const Nothing)
+lexCommand = mkSingleLexLong (=='!') (/='\n') (const (Just "sh . drop first"))
+lexComment = mkSingleLexLong (=='#') (/='\n') (const Nothing)
 
 lexers =
   [ lexNumber
@@ -180,23 +177,25 @@ lexers =
 next :: Input -> (Token, Rest)
 next = sure -- ok because of `dropWhile`
      . maybe (error "unexpected token smth here") id -- YYY: again on craching is not the best
+     -- . maybe (Just (Nothing, xyz)) id -- this with xyz (drop 1) of the Input
      . mayHead
      . dropWhile (== Nothing)
      . (flip pam) lexers
      where pam = map . (|$)
 
-does :: Token -> Token --Action
-does = id --const id
-
-parse :: Input -> [Token] --[Action]
-parse = map (does . fst . fst) -- YYY: filter nops somewhere
-      . takeWhile (not . null . snd . snd)
+parse :: Input -> [String] --[Action]
+parse = map sure
+      . filter (/= Nothing)
+      . map (fst . fst)
+      . takeWhile notEOF
       . zip1Off
       . iterate (next . snd)
       . (,) undefined
-      where zip1Off = uncurry (zip . drop 1) . duple
+      where
+        zip1Off = uncurry (zip . drop 1) . duple
+        notEOF = not . null . snd . snd
 
 --- entry point
---main and such
+-- TODO: parse args
 main :: IO ()
 main = interact $ show . parse
