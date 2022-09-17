@@ -112,7 +112,7 @@ mkSureLexLong = (. f) . g
 mkLexLong :: (Char -> Bool) -> (Char -> Bool) -> (Output -> Token) -> Lexer
 mkLexLong = (. mkSureLexLong) . (.) . (. fmap) . (|.) . mayIfHead
 
-lexNum = (mkLexLong $$) (flip elem $ "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_") (Val . Num . read)
+lexNum = (mkLexLong $$) (flip elem $ "0123456789") (Val . Num . read)
 lexStr = mkLexLong (=='[') (/=']') (Val . Str . tail)
 lexSkip = (mkLexLong $$) (flip elem $ "\t\n\r ]") (const (Op "nop"))
 -- printing commands
@@ -170,52 +170,21 @@ lexCmt = mkLexLong (=='#') (/='\n') (const (Op "nop"))
 --lexEq = mkLexComplex ';' (Op . ((flip (:)) "#get"))
 
 lexers =
-  [ lexNum
-  , lexStr
-  , lexSkip
-  , lexPln
-  , lexNln
-  , lexPnt
-  , lexDmp
-  , lexAdd
-  , lexSub
-  , lexMul
-  , lexDiv
-  , lexRem
-  , lexQuo
-  , lexExp
-  , lexMex
-  , lexSrt
-  , lexClr
-  , lexDup
-  , lexSwp
-  , lexRot
-  , lexSer
-  , lexGer
-  , lexPur
-  , lexPor
-  , lexSir
-  , lexSor
-  , lexSpr
-  , lexGir
-  , lexGor
-  , lexGpr
-  , lexBla
-  , lexExc
-  , lexGt
-  , lexNGt
-  , lexLt
-  , lexNLt
-  , lexEq
-  , lexNEq
-  , lexRdx
-  , lexQui
-  , lexMqu
-  , lexNdd
-  , lexNfd
-  , lexDpt
-  , lexCmd
+  [ lexStr
   , lexCmt
+  , lexSkip
+  , lexNum
+  , lexNGt , lexNLt , lexNEq -- x2
+  , lexCmd
+  , lexGt , lexLt , lexEq -- x
+  , lexSer , lexGer , lexPur , lexPor -- x
+  , lexPln , lexNln , lexPnt , lexDmp
+  , lexAdd , lexSub , lexMul , lexDiv , lexRem , lexQuo , lexExp , lexMex , lexSrt
+  , lexClr , lexDup , lexSwp , lexRot
+  , lexSir , lexSor , lexSpr , lexGir , lexGor , lexGpr
+  , lexBla , lexExc
+  , lexRdx , lexQui , lexMqu
+  , lexNdd , lexNfd , lexDpt
   ]
 
 next :: Input -> (Token, Rest)
