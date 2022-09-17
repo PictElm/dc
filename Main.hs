@@ -160,21 +160,21 @@ lexAllComplex2 = mkMultipleLexComplex2
           ])
   ]
 
-lexNumber = (mkSingleLexLong $$) (flip elem $ "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_") (Val . Num . read)
+lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (Val . Num . read)
 lexString = mkSingleLexLong (=='[') (/=']') (Val . Str . tail) -- FIXME: capture closing ']'
 lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const (Op "nop"))
 lexCommand = mkSingleLexLong (=='!') (/='\n') (const (Op "sh . drop first"))
 lexComment = mkSingleLexLong (=='#') (/='\n') (const (Op "nop"))
 
 lexers =
-  [ lexAllSimple
-  , lexAllComplex
-  , lexAllComplex2
-  , lexNumber
-  , lexString
+  [ lexNumber
   , lexSkip
-  , lexCommand
+  , lexString
   , lexComment
+  , lexAllComplex2
+  , lexCommand
+  , lexAllComplex
+  , lexAllSimple
   ]
 
 next :: Input -> (Token, Rest)
