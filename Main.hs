@@ -21,6 +21,10 @@ mapBoth = ($$) (flip . (flip x .) . y)
           x = mapFst . fst
           y = mapSnd . snd
 
+-- | eg.: `f a . g a`
+tee :: (c -> d -> z) -> (a -> c) -> (a -> d) -> a -> z
+tee = curry . (. (. duple) . mapBoth) . (.) . uncurry
+
 mapBothFstBin :: (t -> a -> c, b -> d) -> t -> (a, b) -> (c, d)
 mapBothFstBin = (.) mapBoth . flip (mapFst . (|$))
 
@@ -69,153 +73,108 @@ type Input = String
 type Output = [Char]
 type Rest = String
 
--- | mkLexSimple x
---   parses `it ::= x`
-mkLexSimple :: Char -> Token -> Lexer
-mkLexSimple = (. const) . flip mkLexLong (const False) . (==)
+-- | parses every `it ::= x`
+mkMultipleLexSimple :: [(Char, Token)] -> Lexer
+mkMultipleLexSimple = (uncurry fmap .) . (. duple)
+                    . mapBothSndBin (flip (,) . drop 1, (. mayHead) . (=<<) . flip lookup)
 
--- mkLexSimple' :: [(Char, Token)] -> Lexer
--- mkLexSimple' t = ((flip lookup) t =<<) . mayHead
--- -- lexSimple = ((flip lookup) [('+', "add"), ('k', "spr")] =<<) . mayHead
--- lexSimple = mkLexSimple' [('+', "add"), ('k', "spr")]
+-- | parses every `it ::= x <r>`
+mkMultipleLexComplex :: [(Char, Char -> Token)] -> Lexer
+mkMultipleLexComplex = (g `teeDot` h `teeThn`) . f
+                     where
+                       f = ((. mayHead) . (=<<) . flip lookup) -- get fr :: (Char -> Token)
+                       g = flip fmap . mayHead . drop 1 -- get r :: Char and pass it through fr
+                       h = (.) . flip (,) . drop 2 -- build the result (Token, Rest)
+                       teeDot = tee (.)
+                       teeThn = tee (=<<)
 
-mkSureLexComplex :: (Char -> Token) -> SureLexer
-mkSureLexComplex = (. duple)
-                 . mapBothFstBin ((. head . drop 1), drop 2)
--- YYY: at head: "error: expected register next"
---      but this is not a solution (to crash); it
---      should just have been Nothing on the level
---      of the may lexer
-
--- | mkLexComplex x (f r)
---   parses `it ::= x <r>`
---   and r will be any character
-mkLexComplex :: Char -> (Char -> Token) -> Lexer
-mkLexComplex = (. fmap . mkSureLexComplex) . (|.) . mayIfHead . (==)
-
--- | mkLexComplex2 y x (f r)
---   parses `it ::= y x <r>`
---   and r will be any character
-mkLexComplex2 :: Char -> Char -> (Char -> Token) -> Lexer
-mkLexComplex2 = (. mkLexComplex) . (.) . (. (=<<)) . (|.) . (.) (drop 1 <$>) . mayIfHead . (==)
-
-mkSureLexLong :: (Char -> Bool) -> (Output -> Token) -> SureLexer
-mkSureLexLong = (. f) . g
-              where
-                f = (uncurry . mapBothFstBin)
-                  . (flip (,)) id . (. (:) . head) . (.)
-                g = (|.) . (. duple) . mapSnd . (. drop 1) . span
+-- | parses every `it ::= y x <r>`
+mkMultipleLexComplex2 :: [(Char, [(Char, Char -> Token)])] -> Lexer
+mkMultipleLexComplex2 = (flip mksublex `teeThn`) . f
+                      where
+                        f = ((. mayHead) . (=<<) . flip lookup) -- get t' :: [(Char, Char -> Token)]
+                        mksublex = (. drop 1) . mkMultipleLexComplex
+                        teeThn = tee (=<<)
 
 -- | mkLexLong pb pc (f c)
 --   parses `it ::= ?pb {?pc}`
 --   where pb and pc are predicate begin and continue
-mkLexLong :: (Char -> Bool) -> (Char -> Bool) -> (Output -> Token) -> Lexer
-mkLexLong = (. mkSureLexLong) . (.) . (. fmap) . (|.) . mayIfHead
+-- YYY: write once...
+mkSingleLexLong :: (Char -> Bool) -> (Char -> Bool) -> (Output -> Token) -> Lexer
+mkSingleLexLong = (. (. f) . g) . (.) . (. fmap) . (|.) . mayIfHead
+                where
+                  f = (uncurry . mapBothFstBin)
+                    . (flip (,)) id . (. (:) . head) . (.)
+                  g = (|.) . (. duple) . mapSnd . (. drop 1) . span
 
-lexNum = (mkLexLong $$) (flip elem $ "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_") (Val . Num . read)
-lexStr = mkLexLong (=='[') (/=']') (Val . Str . tail)
-lexSkip = (mkLexLong $$) (flip elem $ "\t\n\r ]") (const (Op "nop"))
--- printing commands
-lexPln = mkLexSimple 'p' (Op "pln")
-lexNln = mkLexSimple 'n' (Op "nln")
-lexPnt = mkLexSimple 'P' (Op "pnt")
-lexDmp = mkLexSimple 'f' (Op "dmp")
--- arithmetic
-lexAdd = mkLexSimple '+' (Op "add")
-lexSub = mkLexSimple '-' (Op "sub")
-lexMul = mkLexSimple '*' (Op "mul")
-lexDiv = mkLexSimple '/' (Op "div")
-lexRem = mkLexSimple '%' (Op "rem")
-lexQuo = mkLexSimple '~' (Op "quo")
-lexExp = mkLexSimple '^' (Op "exp")
-lexMex = mkLexSimple '|' (Op "mex")
-lexSrt = mkLexSimple 'v' (Op "srt")
--- stack control
-lexClr = mkLexSimple 'c' (Op "clr")
-lexDup = mkLexSimple 'd' (Op "dup")
-lexSwp = mkLexSimple 'r' (Op "swp")
-lexRot = mkLexSimple 'R' (Op "rot")
--- registers
-lexSer = mkLexComplex 's' (Op . ((flip (:)) "#ser"))
-lexGer = mkLexComplex 'l' (Op . ((flip (:)) "#ger"))
-lexPur = mkLexComplex 'S' (Op . ((flip (:)) "#pur"))
-lexPor = mkLexComplex 'L' (Op . ((flip (:)) "#por"))
--- parameters
-lexSir = mkLexSimple 'i' (Op "sir")
-lexSor = mkLexSimple 'o' (Op "sor")
-lexSpr = mkLexSimple 'k' (Op "spr")
-lexGir = mkLexSimple 'I' (Op "gir")
-lexGor = mkLexSimple 'O' (Op "gor")
-lexGpr = mkLexSimple 'K' (Op "gpr")
--- strings (& macros)
-lexBla = mkLexSimple 'a' (Op "bla")
-lexExc = mkLexSimple 'x' (Op "exc")
-lexGt = mkLexComplex '>' (Op . ((flip (:)) "#gt"))
-lexNGt = mkLexComplex2 '!' '>' (Op . ((flip (:)) "#le"))
-lexLt = mkLexComplex '<' (Op . ((flip (:)) "#lt"))
-lexNLt = mkLexComplex2 '!' '<' (Op . ((flip (:)) "#ge"))
-lexEq = mkLexComplex '=' (Op . ((flip (:)) "#eq"))
-lexNEq = mkLexComplex2 '!' '=' (Op . ((flip (:)) "#ne"))
-lexRdx = mkLexSimple '?' (Op "rdx")
-lexQui = mkLexSimple 'q' (Op "qui")
-lexMqu = mkLexSimple 'Q' (Op "mqu")
--- status inquiry
-lexNdd = mkLexSimple 'Z' (Op "ndd")
-lexNfd = mkLexSimple 'X' (Op "nfd")
-lexDpt = mkLexSimple 'z' (Op "dpt")
--- miscellianeous
-lexCmd = mkLexLong (=='!') (/='\n') (const (Op "sh . drop first"))
-lexCmt = mkLexLong (=='#') (/='\n') (const (Op "nop"))
---lexEq = mkLexComplex ':' (Op . ((flip (:)) "#set"))
---lexEq = mkLexComplex ';' (Op . ((flip (:)) "#get"))
+lexAllSimple = mkMultipleLexSimple
+  [ ('p', (Op "pln"))
+  , ('n', (Op "nln"))
+  , ('P', (Op "pnt"))
+  , ('f', (Op "dmp"))
+  , ('+', (Op "add"))
+  , ('-', (Op "sub"))
+  , ('*', (Op "mul"))
+  , ('/', (Op "div"))
+  , ('%', (Op "rem"))
+  , ('~', (Op "quo"))
+  , ('^', (Op "exp"))
+  , ('|', (Op "mex"))
+  , ('v', (Op "srt"))
+  , ('c', (Op "clr"))
+  , ('d', (Op "dup"))
+  , ('r', (Op "swp"))
+  , ('R', (Op "rot"))
+  , ('i', (Op "sir"))
+  , ('o', (Op "sor"))
+  , ('k', (Op "spr"))
+  , ('I', (Op "gir"))
+  , ('O', (Op "gor"))
+  , ('K', (Op "gpr"))
+  , ('a', (Op "bla"))
+  , ('x', (Op "exc"))
+  , ('?', (Op "rdx"))
+  , ('q', (Op "qui"))
+  , ('Q', (Op "mqu"))
+  , ('Z', (Op "ndd"))
+  , ('X', (Op "nfd"))
+  , ('z', (Op "dpt"))
+  ]
+
+lexAllComplex = mkMultipleLexComplex
+  [ ('s', (Op . (flip (:) "#ser")))
+  , ('l', (Op . (flip (:) "#ger")))
+  , ('S', (Op . (flip (:) "#pur")))
+  , ('L', (Op . (flip (:) "#por")))
+  , ('>', (Op . (flip (:) "#gt")))
+  , ('<', (Op . (flip (:) "#lt")))
+  , ('=', (Op . (flip (:) "#eq")))
+  -- , (':', (Op . (flip (:) "#set")))
+  -- , (';', (Op . (flip (:) "#get")))
+  ]
+
+lexAllComplex2 = mkMultipleLexComplex2
+  [ ('!', [ ('>', (Op . (flip (:) "#le")))
+          , ('<', (Op . (flip (:) "#ge")))
+          , ('=', (Op . (flip (:) "#ne")))
+          ])
+  ]
+
+lexNumber = (mkSingleLexLong $$) (flip elem $ "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_") (Val . Num . read)
+lexString = mkSingleLexLong (=='[') (/=']') (Val . Str . tail) -- FIXME: capture closing ']'
+lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const (Op "nop"))
+lexCommand = mkSingleLexLong (=='!') (/='\n') (const (Op "sh . drop first"))
+lexComment = mkSingleLexLong (=='#') (/='\n') (const (Op "nop"))
 
 lexers =
-  [ lexNum
-  , lexStr
+  [ lexAllSimple
+  , lexAllComplex
+  , lexAllComplex2
+  , lexNumber
+  , lexString
   , lexSkip
-  , lexPln
-  , lexNln
-  , lexPnt
-  , lexDmp
-  , lexAdd
-  , lexSub
-  , lexMul
-  , lexDiv
-  , lexRem
-  , lexQuo
-  , lexExp
-  , lexMex
-  , lexSrt
-  , lexClr
-  , lexDup
-  , lexSwp
-  , lexRot
-  , lexSer
-  , lexGer
-  , lexPur
-  , lexPor
-  , lexSir
-  , lexSor
-  , lexSpr
-  , lexGir
-  , lexGor
-  , lexGpr
-  , lexBla
-  , lexExc
-  , lexGt
-  , lexNGt
-  , lexLt
-  , lexNLt
-  , lexEq
-  , lexNEq
-  , lexRdx
-  , lexQui
-  , lexMqu
-  , lexNdd
-  , lexNfd
-  , lexDpt
-  , lexCmd
-  , lexCmt
+  , lexCommand
+  , lexComment
   ]
 
 next :: Input -> (Token, Rest)
