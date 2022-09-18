@@ -1,3 +1,5 @@
+import System.Environment -- for `getArgs` - this is so frustrating
+
 --- utils
 (|.) = flip (.)
 (|$) = flip ($)
@@ -9,8 +11,12 @@ mapSnd :: (b -> d) -> (a, b) -> (a, d)
 mapSnd = fmap
 
 duple :: a -> (a, a)
-duple = (mapSnd head . mapFst head)
-      . (splitAt 1 . replicate 2)
+-- NOTE: with duple, seems most of the time is lost on `replicate`
+--       so yes, it can be point free, but also twice the cost
+-- duple = (mapSnd head . mapFst head)
+--       . (splitAt 1 . replicate 2)
+duple a = (a, a)
+-- duple = ($$) (,)
 
 ($$) :: (a -> a -> b) -> a -> b
 ($$) = flip (flip uncurry . duple)
@@ -36,7 +42,8 @@ mayHead = foldr (const . Just) Nothing
 
 mayIfHead :: (Char -> Bool) -> Input -> Maybe Input
 mayIfHead = (. duple) . (.) (uncurry fmap)
-            . mapBothSndBin (const, (mayHead .) . takeWhile)
+          . mapBothSndBin (const, (mayHead .) . takeWhile)
+-- YYY: probably can be better
 
 sure :: Maybe a -> a
 sure = maybe undefined id
@@ -54,13 +61,13 @@ type State = (Stack)
 -- type MacroStack = [Action]
 -- type State = (Params, Stack, RegisterMap, MacroStack)
 
-type Action = State -> State
+type Action = String --State -> State
 
 exec :: [Action] -> Action
-exec = foldl1 (|.)
+exec = foldl1 (<>) --(|.)
 
 --- lexers/scanners/parsers
-type Token = Maybe String --Action
+type Token = Maybe Action
 
 type Lexer = Input -> Maybe (Token, Rest)
 type SureLexer = Input -> (Token, Rest)
@@ -96,7 +103,7 @@ mkMultipleLexComplex2 = (flip mksublex `teeThn`) . f
 -- | mkLexLong pb pc (f c)
 --   parses `it ::= ?pb {?pc}`
 --   where pb and pc are predicate begin and continue
--- YYY: write once...
+-- YYY: write once... (would like to rewrite)
 mkSingleLexLong :: (Char -> Bool) -> (Char -> Bool) -> (Output -> Token) -> Lexer
 mkSingleLexLong = (. (. f) . g) . (.) . (. fmap) . (|.) . mayIfHead
                 where
@@ -183,7 +190,7 @@ next = sure -- ok because of `dropWhile`
      . (flip pam) lexers
      where pam = map . (|$)
 
-parse :: Input -> [String] --[Action]
+parse :: Input -> [Action]
 parse = map sure
       . filter (/= Nothing)
       . map (fst . fst)
@@ -196,6 +203,23 @@ parse = map sure
         notEOF = not . null . snd . snd
 
 --- entry point
--- TODO: parse args
+type Arg = String
+
+resolveArgs :: [Arg] -> [IO Input] -- DOC: unlike dc (on execution order)
+resolveArgs [] = [pure ""]
+resolveArgs args =
+    ((sure $ lookup (take 2 $ head args) [eArg, fArg]) $ (drop 2 $ head args)) : resolveArgs (drop 1 args)
+  where
+    eArg = ("-e", pure)
+    fArg = ("-f", readFile)
+-- process :: Arg -> (IO Input, Arg) = \l -> mapBoth (!! (take N), drop N) l
+-- recurse :: IO Input -> Args -> IO Input = \o -> \r -> o : (r ?? resolveArgs r ?: [])
+
+getInput :: IO Input
+-- getInput = const (unwords $ resolveArgs getArgs) <$> mayHead <$> getArgs
+getInput = unwords <$> withDefault ["-"] <$> getArgs
+         where withDefault = (. mapBoth (const, mayHead) . duple) . uncurry . maybe
+
 main :: IO ()
-main = interact $ show . parse
+-- main = interact $ show . parse
+main = print =<< getInput
