@@ -164,10 +164,10 @@ lexAllComplex2 = mkMultipleLexComplex2
           ])
   ]
 
-lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (Just . ("pushNum " ++)) --(Val . Num . read)
-lexString = mkSingleLexLong (=='[') (/=']') (Just . ("pushStr " ++)) --(Val . Str . tail) -- FIXME: capture closing ']'
+lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (Just . ("pushNum " ++))
+lexString = mkSingleLexLong (=='[') (/=']') (Just . ("pushStr " ++) . drop 1) -- FIXME: capture closing ']'
 lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const Nothing)
-lexCommand = mkSingleLexLong (=='!') (/='\n') (const (Just "sh . drop first"))
+lexCommand = mkSingleLexLong (=='!') (/='\n') (const (Just "sh . drop 1"))
 lexComment = mkSingleLexLong (=='#') (/='\n') (const Nothing)
 
 lexers =
@@ -206,20 +206,30 @@ parse = map sure
 type Arg = String
 
 resolveArgs :: [Arg] -> [IO Input] -- DOC: unlike dc (on execution order)
-resolveArgs [] = [pure ""]
-resolveArgs args =
-    ((sure $ lookup (take 2 $ head args) [eArg, fArg]) $ (drop 2 $ head args)) : resolveArgs (drop 1 args)
-  where
-    eArg = ("-e", pure)
-    fArg = ("-f", readFile)
--- process :: Arg -> (IO Input, Arg) = \l -> mapBoth (!! (take N), drop N) l
--- recurse :: IO Input -> Args -> IO Input = \o -> \r -> o : (r ?? resolveArgs r ?: [])
+resolveArgs = uncurry recurse . process
+            where
+              recurse :: IO Input -> [Arg] -> [IO Input]
+              recurse = (. tee (maybe []) (const . resolveArgs) mayHead) . (:)
+              process :: [Arg] -> (IO Input, [Arg])
+              process = ($$) (maybe
+                        (mapFst (readFile . head) . splitAt 1) id -- default option
+                        . flip lookup options . (take 2 . head) -- search for existing option
+                      ) -- ^ (both) head ok because condition in `recurse` and default in `getInput`
+              options :: [([Char], [Arg] -> (IO Input, [Arg]))]
+              options =
+                [ ("-V", const (pure "[loosely based on dc (GNU db 1.07.1) 1.4.1]pq", []))
+                , ("-h", const (pure "[most options and commands are compatible with dc(1);\nsee its man page for more informations]pq", []))
+                , ("-e", \args -> (pure "[expression]", drop 1 args)) -- uses next arg if length head is 2
+                , ("-f", \args -> (pure "[scriptfile]", drop 1 args)) -- uses next arg if length head is 2
+                , ("--", const (pure "[long options are not implemented (yet(?))]pq", []))
+                , ("-", (,) getContents . (drop 1))
+                ]
 
 getInput :: IO Input
--- getInput = const (unwords $ resolveArgs getArgs) <$> mayHead <$> getArgs
-getInput = unwords <$> withDefault ["-"] <$> getArgs
-         where withDefault = (. mapBoth (const, mayHead) . duple) . uncurry . maybe
+getInput = fmap unwords (withDefaultArgs ["-"] >>= sequence . resolveArgs)
+         where withDefaultArgs = (<$> getArgs)
+                               . (. mapBoth (const, mayHead) . duple)
+                               . uncurry . maybe
 
 main :: IO ()
--- main = interact $ show . parse
-main = print =<< getInput
+main = (exec . parse) <$> getInput >>= print
