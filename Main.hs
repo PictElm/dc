@@ -205,24 +205,44 @@ parse = map sure
 --- entry point
 type Arg = String
 
+procShortOption :: (Arg -> r) -> [Arg] -> (r, [Arg])
+procShortOption = ($$) . flip (maybe nextOne (const thisOne) . mayHead . drop 2 . head)
+                where -- v (each) first head ok because called from `resolveArgs`
+                  thisOne = (. duple) . mapBothFstBin ((. drop 2 . head), drop 1)
+                  nextOne = (. duple) . mapBothFstBin ((. maybe (error "missing argument for (idk)") id . mayHead . tail), drop 2)
+
+procLongOption :: (Arg -> r) -> [Arg] -> (r, [Arg])
+procLongOption = undefined
+
+version = "[loosely based on dc (GNU db 1.07.1) 1.4.1]pq"
+help = "[most options and commands are compatible with dc(1);\nsee its man page for more information]pq"
+
 resolveArgs :: [Arg] -> [IO Input] -- DOC: unlike dc (on execution order)
 resolveArgs = uncurry recurse . process
             where
-              recurse :: IO Input -> [Arg] -> [IO Input]
               recurse = (. tee (maybe []) (const . resolveArgs) mayHead) . (:)
-              process :: [Arg] -> (IO Input, [Arg])
               process = ($$) (maybe
                         (mapFst (readFile . head) . splitAt 1) id -- default option
                         . flip lookup options . (take 2 . head) -- search for existing option
                       ) -- ^ (both) head ok because condition in `recurse` and default in `getInput`
-              options :: [([Char], [Arg] -> (IO Input, [Arg]))]
+              process' = ($$) (maybe
+                         (error "unknown option given (idk)") id -- fail on unknown
+                         . flip lookup options' . (takeWhile (/='=') . head) -- search for existing long option
+                       ) -- ^ head still ok for same reason
               options =
-                [ ("-V", const (pure "[loosely based on dc (GNU db 1.07.1) 1.4.1]pq", []))
-                , ("-h", const (pure "[most options and commands are compatible with dc(1);\nsee its man page for more informations]pq", []))
-                , ("-e", \args -> (pure "[expression]", drop 1 args)) -- uses next arg if length head is 2
-                , ("-f", \args -> (pure "[scriptfile]", drop 1 args)) -- uses next arg if length head is 2
-                , ("--", const (pure "[long options are not implemented (yet(?))]pq", []))
+                [ ("-V", const (pure version, []))
+                , ("-h", const (pure help, []))
+                , ("-e", procShortOption pure)
+                , ("-f", procShortOption readFile)
+                , ("--", process')
                 , ("-", (,) getContents . (drop 1))
+                -- , ("-", (,) (unlines <$> iterate (const getLine) (pure "")) . (drop 1))
+                ]
+              options' =
+                [ ("--version", const (pure version, []))
+                , ("--help", const (pure help, []))
+                , ("--expression", procLongOption pure)
+                , ("--file", procLongOption readFile)
                 ]
 
 getInput :: IO Input
