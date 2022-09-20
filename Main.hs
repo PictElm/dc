@@ -1,4 +1,5 @@
-import System.Environment -- for `getArgs` - this is so frustrating
+import System.Environment -- for `getArgs`
+import System.Process -- for `system`
 
 --- utils
 (|.) = flip (.)
@@ -165,10 +166,10 @@ lexAllComplex2 = mkMultipleLexComplex2
   ]
 
 lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (Just . ("pushNum " ++))
-lexString = mkSingleLexLong (=='[') (/=']') (Just . ("pushStr " ++) . drop 1) -- FIXME: capture closing ']'
+lexString = mkSingleLexLong (== '[') (/= ']') (Just . ("pushStr " ++) . drop 1) -- FIXME: capture closing ']'
 lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const Nothing)
-lexCommand = mkSingleLexLong (=='!') (/='\n') (const (Just "sh . drop 1"))
-lexComment = mkSingleLexLong (=='#') (/='\n') (const Nothing)
+lexCommand = mkSingleLexLong (== '!') (/= '\n') (const (Just "sh . drop 1"))
+lexComment = mkSingleLexLong (== '#') (/= '\n') (const Nothing)
 
 lexers =
   [ lexNumber
@@ -209,10 +210,10 @@ procShortOption :: (Arg -> r) -> [Arg] -> (r, [Arg])
 procShortOption = ($$) . flip (maybe nextOne (const thisOne) . mayHead . drop 2 . head)
                 where -- v (each) first head ok because called from `resolveArgs`
                   thisOne = (. duple) . mapBothFstBin ((. drop 2 . head), drop 1)
-                  nextOne = (. duple) . mapBothFstBin ((. maybe (error "missing argument for (idk)") id . mayHead . tail), drop 2)
+                  nextOne = (. duple) . mapBothFstBin ((. maybe (error "option requires an argument") id . mayHead . tail), drop 2)
 
 procLongOption :: (Arg -> r) -> [Arg] -> (r, [Arg])
-procLongOption = undefined
+procLongOption = (. splitAt 1) . mapFst . (. drop 1 . dropWhile (/= '=') . head)
 
 version = "[loosely based on dc (GNU db 1.07.1) 1.4.1]pq"
 help = "[most options and commands are compatible with dc(1);\nsee its man page for more information]pq"
@@ -226,8 +227,8 @@ resolveArgs = uncurry recurse . process
                         . flip lookup options . (take 2 . head) -- search for existing option
                       ) -- ^ (both) head ok because condition in `recurse` and default in `getInput`
               process' = ($$) (maybe
-                         (error "unknown option given (idk)") id -- fail on unknown
-                         . flip lookup options' . (takeWhile (/='=') . head) -- search for existing long option
+                         (error "unrecognized option") id -- fail on unknown
+                         . flip lookup options' . (takeWhile (/= '=') . head) -- search for existing long option
                        ) -- ^ head still ok for same reason
               options =
                 [ ("-V", const (pure version, []))
@@ -235,7 +236,7 @@ resolveArgs = uncurry recurse . process
                 , ("-e", procShortOption pure)
                 , ("-f", procShortOption readFile)
                 , ("--", process')
-                , ("-", (,) getContents . (drop 1))
+                , ("-", (,) getContents . (drop 1)) -- unwords . words . --?
                 -- , ("-", (,) (unlines <$> iterate (const getLine) (pure "")) . (drop 1))
                 ]
               options' =
