@@ -76,14 +76,16 @@ clean = State [] (Params 10 10 0) [] []
 
 newtype Action = Action
   { perform :: (IO State, Program) -> (IO State, Program) }
-opUnknown c = Action (\(s, p) -> (s, p)) -- print "operation unimplemented" (ideally to stderr)
+opUnknown = Action . mapFst . (>>) . print . (:": operation unimplemented") -- TODO: use stderr
 
 loop :: (IO State, Program) -> IO State
-loop (final, []) = final
-loop (state, h:t) = loop $ perform h (state, t)
+loop = ($$) (tfa (mayHead . snd) -- get head into Maybe
+     . (. fst) . flip maybe -- if Nothing, fst (the IO State)
+     . (loop .) . flip perform . mapSnd tail) -- else perform action and loop
+     where tfa = tee (|$)
 
 run :: Program -> IO State -> IO State
-run actions initial = loop (initial, actions)
+run = flip $ curry loop
 
 --- lexers/scanners/parsers
 type Token = Maybe Action
@@ -131,64 +133,69 @@ mkSingleLexLong = (. (. f) . g) . (.) . (. fmap) . (|.) . mayIfHead
 
 nop = Action id -- TODO: remove, actual nop is implemented with Maybe
 
+-- TODO: instances and such or something idk
+addCrap :: Item -> Item -> Item
+addCrap (Num a) (Num b) = Num (a+b)
+addCrap (Str a) (Str b) = Str (a++b)
+
 lexAllSimple = mkMultipleLexSimple
-  [ ('p', (Just nop)) -- "pln"))
-  , ('n', (Just nop)) -- "nln"))
-  , ('P', (Just nop)) -- "pnt"))
-  , ('f', (Just nop)) -- "dmp"))
-  , ('+', (Just nop)) -- "add"))
-  , ('-', (Just nop)) -- "sub"))
-  , ('*', (Just nop)) -- "mul"))
-  , ('/', (Just nop)) -- "div"))
-  , ('%', (Just nop)) -- "rem"))
-  , ('~', (Just nop)) -- "quo"))
-  , ('^', (Just nop)) -- "exp"))
-  , ('|', (Just nop)) -- "mex"))
-  , ('v', (Just nop)) -- "srt"))
-  , ('c', (Just nop)) -- "clr"))
-  , ('d', (Just nop)) -- "dup"))
-  , ('r', (Just nop)) -- "swp"))
-  , ('R', (Just nop)) -- "rot"))
-  , ('i', (Just nop)) -- "sir"))
-  , ('o', (Just nop)) -- "sor"))
-  , ('k', (Just nop)) -- "spr"))
-  , ('I', (Just nop)) -- "gir"))
-  , ('O', (Just nop)) -- "gor"))
-  , ('K', (Just nop)) -- "gpr"))
-  , ('a', (Just nop)) -- "bla"))
-  , ('x', (Just nop)) -- "exc"))
-  , ('?', (Just nop)) -- "rdx"))
-  , ('q', (Just nop)) -- "qui"))
-  , ('Q', (Just nop)) -- "mqu"))
-  , ('Z', (Just nop)) -- "ndd"))
-  , ('X', (Just nop)) -- "nfd"))
-  , ('z', (Just nop)) -- "dpt"))
+  [ ('p', Just$Action (\(s, l) -> (s >>= print.(maybe(error"print: stack empty")id.mayHead).stack >> s, l)))
+  , ('n', Just nop)
+  , ('P', Just nop)
+  , ('f', Just nop)
+  , ('+', Just$Action (\(s, l) -> ((\s' -> s'{stack=((\(a:b:t) -> addCrap a b:t).stack)s'}) <$> s, l)))
+  , ('-', Just nop)
+  , ('*', Just nop)
+  , ('/', Just nop)
+  , ('%', Just nop)
+  , ('~', Just nop)
+  , ('^', Just nop)
+  , ('|', Just nop)
+  , ('v', Just nop)
+  , ('c', Just nop)
+  , ('d', Just nop)
+  , ('r', Just nop)
+  , ('R', Just nop)
+  , ('i', Just nop)
+  , ('o', Just nop)
+  , ('k', Just nop)
+  , ('I', Just nop)
+  , ('O', Just nop)
+  , ('K', Just nop)
+  , ('a', Just nop)
+  , ('x', Just nop)
+  , ('?', Just nop)
+  , ('q', Just nop)
+  , ('Q', Just nop)
+  , ('Z', Just nop)
+  , ('X', Just nop)
+  , ('z', Just nop)
   ]
 
 lexAllComplex = mkMultipleLexComplex
-  [ ('s', const (Just nop)) -- . (flip (:) "#ser")))
-  , ('l', const (Just nop)) -- . (flip (:) "#ger")))
-  , ('S', const (Just nop)) -- . (flip (:) "#pur")))
-  , ('L', const (Just nop)) -- . (flip (:) "#por")))
-  , ('>', const (Just nop)) -- . (flip (:) "#gt")))
-  , ('<', const (Just nop)) -- . (flip (:) "#lt")))
-  , ('=', const (Just nop)) -- . (flip (:) "#eq")))
+  [ ('s', const$Just nop)
+  , ('l', const$Just nop)
+  , ('S', const$Just nop)
+  , ('L', const$Just nop)
+  , ('>', const$Just nop)
+  , ('<', const$Just nop)
+  , ('=', const$Just nop)
   -- , (':', (Just . (flip (:) "#set")))
   -- , (';', (Just . (flip (:) "#get")))
   ]
 
 lexAllComplex2 = mkMultipleLexComplex2
-  [ ('!', [ ('>', const (Just nop)) -- . (flip (:) "#le")))
-          , ('<', const (Just nop)) -- . (flip (:) "#ge")))
-          , ('=', const (Just nop)) -- . (flip (:) "#ne")))
+  [ ('!', [ ('>', const$Just nop)
+          , ('<', const$Just nop)
+          , ('=', const$Just nop)
           ])
   ]
 
-lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (const $ Just nop) -- (Just . ("pushNum " ++))
-lexString = mkSingleLexLong (== '[') (/= ']') (const $ Just nop) -- (Just . ("pushStr " ++) . drop 1) -- FIXME: capture closing ']'
-lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const Nothing)
-lexCommand = mkSingleLexLong (== '!') (/= '\n') (const $ Just nop) -- (const (Just "sh . drop 1"))
-lexComment = mkSingleLexLong (== '#') (/= '\n') (const Nothing)
+lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (\c -> Just$Action (\(s, l) -> ((\s' -> s'{stack=(((Num .read)c:).stack)s'}) <$> s, l)))
+lexString = mkSingleLexLong (== '[') (/= ']') (const$Just nop) -- FIXME: capture closing ']'
+lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const$Nothing)
+lexCommand = mkSingleLexLong (== '!') (/= '\n') (const$Just nop)
+lexComment = mkSingleLexLong (== '#') (/= '\n') (const$Nothing)
 
 lexers =
   [ lexNumber
