@@ -55,23 +55,40 @@ data Item
   | Str String
   deriving (Show, Eq)
 
-type Stack = [Item]
--- type Registers = Map Char (Stack, [Item])
+type Program = [Action] -- newtype Action below
 
-type State = (Stack)
--- type MacroStack = [Action]
--- type State = (Params, Stack, RegisterMap, MacroStack)
+type Stack = [Item] -- (why not with nest tuple?)
+data Params = Params
+  { inBase :: Int
+  , outBase :: Int
+  , precision :: Int
+  }
+type Registers = [(Char, Stack)] -- (Char, (Stack, [Item]))
+type MacroStack = [Program]
 
-type Action = String --State -> State
+data State = State
+  { stack :: Stack
+  , params :: Params
+  , registers :: Registers
+  , macroStack :: MacroStack
+  }
+clean = State [] (Params 10 10 0) [] []
 
-exec :: [Action] -> Action
-exec = foldl1 (<>) --(|.)
+newtype Action = Action
+  { perform :: (IO State, Program) -> (IO State, Program) }
+opUnknown c = Action (\(s, p) -> (s, p)) -- print "operation unimplemented" (ideally to stderr)
+
+loop :: (IO State, Program) -> IO State
+loop (final, []) = final
+loop (state, h:t) = loop $ perform h (state, t)
+
+run :: Program -> IO State -> IO State
+run actions initial = loop (initial, actions)
 
 --- lexers/scanners/parsers
 type Token = Maybe Action
 
 type Lexer = Input -> Maybe (Token, Rest)
-type SureLexer = Input -> (Token, Rest)
 
 type Accepts = [Char]
 type Input = String
@@ -112,63 +129,65 @@ mkSingleLexLong = (. (. f) . g) . (.) . (. fmap) . (|.) . mayIfHead
                     . (flip (,)) id . (. (:) . head) . (.)
                   g = (|.) . (. duple) . mapSnd . (. drop 1) . span
 
+nop = Action id -- TODO: remove, actual nop is implemented with Maybe
+
 lexAllSimple = mkMultipleLexSimple
-  [ ('p', (Just "pln"))
-  , ('n', (Just "nln"))
-  , ('P', (Just "pnt"))
-  , ('f', (Just "dmp"))
-  , ('+', (Just "add"))
-  , ('-', (Just "sub"))
-  , ('*', (Just "mul"))
-  , ('/', (Just "div"))
-  , ('%', (Just "rem"))
-  , ('~', (Just "quo"))
-  , ('^', (Just "exp"))
-  , ('|', (Just "mex"))
-  , ('v', (Just "srt"))
-  , ('c', (Just "clr"))
-  , ('d', (Just "dup"))
-  , ('r', (Just "swp"))
-  , ('R', (Just "rot"))
-  , ('i', (Just "sir"))
-  , ('o', (Just "sor"))
-  , ('k', (Just "spr"))
-  , ('I', (Just "gir"))
-  , ('O', (Just "gor"))
-  , ('K', (Just "gpr"))
-  , ('a', (Just "bla"))
-  , ('x', (Just "exc"))
-  , ('?', (Just "rdx"))
-  , ('q', (Just "qui"))
-  , ('Q', (Just "mqu"))
-  , ('Z', (Just "ndd"))
-  , ('X', (Just "nfd"))
-  , ('z', (Just "dpt"))
+  [ ('p', (Just nop)) -- "pln"))
+  , ('n', (Just nop)) -- "nln"))
+  , ('P', (Just nop)) -- "pnt"))
+  , ('f', (Just nop)) -- "dmp"))
+  , ('+', (Just nop)) -- "add"))
+  , ('-', (Just nop)) -- "sub"))
+  , ('*', (Just nop)) -- "mul"))
+  , ('/', (Just nop)) -- "div"))
+  , ('%', (Just nop)) -- "rem"))
+  , ('~', (Just nop)) -- "quo"))
+  , ('^', (Just nop)) -- "exp"))
+  , ('|', (Just nop)) -- "mex"))
+  , ('v', (Just nop)) -- "srt"))
+  , ('c', (Just nop)) -- "clr"))
+  , ('d', (Just nop)) -- "dup"))
+  , ('r', (Just nop)) -- "swp"))
+  , ('R', (Just nop)) -- "rot"))
+  , ('i', (Just nop)) -- "sir"))
+  , ('o', (Just nop)) -- "sor"))
+  , ('k', (Just nop)) -- "spr"))
+  , ('I', (Just nop)) -- "gir"))
+  , ('O', (Just nop)) -- "gor"))
+  , ('K', (Just nop)) -- "gpr"))
+  , ('a', (Just nop)) -- "bla"))
+  , ('x', (Just nop)) -- "exc"))
+  , ('?', (Just nop)) -- "rdx"))
+  , ('q', (Just nop)) -- "qui"))
+  , ('Q', (Just nop)) -- "mqu"))
+  , ('Z', (Just nop)) -- "ndd"))
+  , ('X', (Just nop)) -- "nfd"))
+  , ('z', (Just nop)) -- "dpt"))
   ]
 
 lexAllComplex = mkMultipleLexComplex
-  [ ('s', (Just . (flip (:) "#ser")))
-  , ('l', (Just . (flip (:) "#ger")))
-  , ('S', (Just . (flip (:) "#pur")))
-  , ('L', (Just . (flip (:) "#por")))
-  , ('>', (Just . (flip (:) "#gt")))
-  , ('<', (Just . (flip (:) "#lt")))
-  , ('=', (Just . (flip (:) "#eq")))
+  [ ('s', const (Just nop)) -- . (flip (:) "#ser")))
+  , ('l', const (Just nop)) -- . (flip (:) "#ger")))
+  , ('S', const (Just nop)) -- . (flip (:) "#pur")))
+  , ('L', const (Just nop)) -- . (flip (:) "#por")))
+  , ('>', const (Just nop)) -- . (flip (:) "#gt")))
+  , ('<', const (Just nop)) -- . (flip (:) "#lt")))
+  , ('=', const (Just nop)) -- . (flip (:) "#eq")))
   -- , (':', (Just . (flip (:) "#set")))
   -- , (';', (Just . (flip (:) "#get")))
   ]
 
 lexAllComplex2 = mkMultipleLexComplex2
-  [ ('!', [ ('>', (Just . (flip (:) "#le")))
-          , ('<', (Just . (flip (:) "#ge")))
-          , ('=', (Just . (flip (:) "#ne")))
+  [ ('!', [ ('>', const (Just nop)) -- . (flip (:) "#le")))
+          , ('<', const (Just nop)) -- . (flip (:) "#ge")))
+          , ('=', const (Just nop)) -- . (flip (:) "#ne")))
           ])
   ]
 
-lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (Just . ("pushNum " ++))
-lexString = mkSingleLexLong (== '[') (/= ']') (Just . ("pushStr " ++) . drop 1) -- FIXME: capture closing ']'
+lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (const $ Just nop) -- (Just . ("pushNum " ++))
+lexString = mkSingleLexLong (== '[') (/= ']') (const $ Just nop) -- (Just . ("pushStr " ++) . drop 1) -- FIXME: capture closing ']'
 lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const Nothing)
-lexCommand = mkSingleLexLong (== '!') (/= '\n') (const (Just "sh . drop 1"))
+lexCommand = mkSingleLexLong (== '!') (/= '\n') (const $ Just nop) -- (const (Just "sh . drop 1"))
 lexComment = mkSingleLexLong (== '#') (/= '\n') (const Nothing)
 
 lexers =
@@ -183,17 +202,20 @@ lexers =
   ]
 
 next :: Input -> (Token, Rest)
-next = sure -- ok because of `dropWhile`
-     . maybe (error "unexpected token smth here") id -- YYY: again on craching is not the best
-     -- . maybe (Just (Nothing, xyz)) id -- this with xyz (drop 1) of the Input
-     . mayHead
-     . dropWhile (== Nothing)
-     . (flip pam) lexers
-     where pam = map . (|$)
+next = ((sure .) . orUnkOp) `ta` findLex -- `sure`: ok because of `orUnkOp`
+     where -- YYY: probably one too many 'sure/maybe' but anyway
+       orUnkOp = flip maybe id
+               . Just . mapBoth (Just . opUnknown . head, drop 1)
+               . duple
+       findLex = mayHead
+               . dropWhile (maybe True (const False))
+               . (flip pam) lexers
+       pam = map . (|$)
+       ta = tee ($)
 
-parse :: Input -> [Action]
-parse = map sure
-      . filter (/= Nothing)
+parse :: Input -> Program
+parse = map sure -- ok because of `filter`
+      . filter (maybe False (const True)) -- filters nops
       . map (fst . fst)
       . takeWhile notEOF
       . zip1Off
@@ -253,4 +275,4 @@ getInput = fmap unwords (withDefaultArgs ["-"] >>= sequence . resolveArgs)
                                . uncurry . maybe
 
 main :: IO ()
-main = (exec . parse) <$> getInput >>= print
+main = fmap (const ()) $ flip run (pure clean) . parse =<< getInput
