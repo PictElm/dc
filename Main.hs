@@ -49,6 +49,13 @@ mayIfHead = (. duple) . (.) (uncurry fmap)
 sure :: Maybe a -> a
 sure = maybe undefined id
 
+extract :: (Eq a) => a -> [(a, b)] -> (Maybe b, [(a, b)])
+extract = (mapBoth (getFound, getRest) .) . search
+        where
+          search = (duple .) . span . (. fst) . (/=)
+          getFound = (snd <$>) . mayHead . snd
+          getRest = (uncurry (<>) $) . mapSnd (drop 1)
+
 --- calculator
 data Item
   = Num Integer
@@ -63,7 +70,8 @@ data Params = Params
   , outBase :: Int
   , precision :: Int
   }
-type Registers = [(Char, Stack)] -- (Char, (Stack, [Item]))
+type Register = (Stack) -- (Stack, [Item])
+type Registers = [(Char, Register)]
 type MacroStack = [Program]
 
 data State = State
@@ -76,7 +84,65 @@ clean = State [] (Params 10 10 0) [] []
 
 newtype Action = Action
   { perform :: (IO State, Program) -> (IO State, Program) }
-opUnknown = Action . mapFst . (>>) . print . (:": operation unimplemented") -- TODO: use stderr
+unimplemented = Action . mapFst . (>>) . print . (:": operation unimplemented") -- TODO: use stderr
+
+-- | `Action`s are made of more elementary `Operation`s
+--   `Operation a b = ActionHead a | ActionTail b | (ActionGlue a -> ActionGlue b)`
+--   `ActionGlue` is an internal temporary states between operations
+type ActionGlue a = (IO (State, a), Program)
+type ActionHead a = (IO State, Program) -> ActionGlue a
+type ActionTail a = ActionGlue a -> (IO State, Program)
+
+-- | ops are combined with the (|.) and (|>) operators
+(|>) :: ActionHead a -> ActionTail a -> Action
+(|>) = curry (Action . uncurry (|.))
+
+-- TODO: desing as middle by default, not head
+--       eg. cannot do `opPop |. opLoad |> opStore`
+--       or every as middle, and use
+--       - a 'init' stage
+--       - a 'commit' stage
+
+opStateHead :: (State -> (State, a)) -> ActionHead a
+opStateHead f = \(s, l) -> (f <$> s, l)
+opStateTail :: ((State, a) -> State) -> ActionTail a
+opStateTail f = \(g, l) -> (f <$> g, l)
+
+opPop :: Int -> ([Item] -> a) -> ActionHead a
+opPop n f = opStateHead (\s' ->
+          ( s' { stack = (drop n . stack) s' }
+          , (f . take n . stack) s' -- TODO: length check, abort (ase
+          ))
+
+opPush :: (a -> [Item]) -> ActionTail a
+opPush f = opStateTail (\(s', a) ->
+         s' { stack = f a <> stack s' })
+
+opLoad :: Char -> (Register -> a) -> ActionHead a
+opLoad c f = opStateHead (\s' -> let (sel,regs) = mapFst orDefault $ extract c (registers s') in
+           ( s' { registers = regs }
+           , f sel
+           ))
+       where orDefault = maybe (error "TODO: default for register") id
+
+opStore :: Char -> (a -> Register) -> ActionTail a
+opStore c f = opStateTail (\(s', a) ->
+            s' { registers = (c, f a) : registers s' })
+
+opUn :: (Item -> Item) -> Action
+opUn = (opPop 1 head |>) . opPush . ((:[]) .)
+
+opBin :: (Item -> Item -> Item) -> Action
+opBin = (opPop 2 (tee (,) head last) |>) . opPush . ((:[]) .) . uncurry
+
+-- opTer :: (Item -> Item -> Item -> Item) -> Action
+-- opTer f = opPop 3 (\[a,b,c] -> ((a,b),c)) |> opPush ((:[]) . (uncurry . uncurry) f)
+
+opStack :: Int -> ([Item] -> [Item]) -> Action
+opStack = (. opPush) . (|>) . (flip opPop) id
+
+-- opControl :: ((Program, MacroStack) -> (Program, MacroStack)) -> Action
+-- opControl f = Action id
 
 loop :: (IO State, Program) -> IO State
 loop = ($$) (tfa (mayHead . snd) -- get head into Maybe
@@ -143,7 +209,7 @@ lexAllSimple = mkMultipleLexSimple
   , ('n', Just nop)
   , ('P', Just nop)
   , ('f', Just nop)
-  , ('+', Just$Action (\(s, l) -> ((\s' -> s'{stack=((\(a:b:t) -> addCrap a b:t).stack)s'}) <$> s, l)))
+  , ('+', Just $ opBin addCrap)
   , ('-', Just nop)
   , ('*', Just nop)
   , ('/', Just nop)
@@ -173,7 +239,7 @@ lexAllSimple = mkMultipleLexSimple
   ]
 
 lexAllComplex = mkMultipleLexComplex
-  [ ('s', const$Just nop)
+  [ ('s', \c -> Just $ (opPop 1 head |. opLoad c id |> opStore c (\r -> r)))
   , ('l', const$Just nop)
   , ('S', const$Just nop)
   , ('L', const$Just nop)
@@ -191,8 +257,13 @@ lexAllComplex2 = mkMultipleLexComplex2
           ])
   ]
 
-lexNumber = (mkSingleLexLong $$) (flip elem $ "0123456789") (\c -> Just$Action (\(s, l) -> ((\s' -> s'{stack=(((Num .read)c:).stack)s'}) <$> s, l)))
-lexString = mkSingleLexLong (== '[') (/= ']') (const$Just nop) -- FIXME: capture closing ']'
+lexNumber = (mkSingleLexLong $$)
+              (flip elem $ "0123456789")
+              (Just . opStack 0 . const . (:[]) . Num . read)
+lexString = mkSingleLexLong -- FIXME: capture closing ']'
+              (== '[') (/= ']')
+              (const$Just nop)
+              -- (Just . opStack 0 . const . (:[]) . Str)
 lexSkip = (mkSingleLexLong $$) (flip elem $ "\t\n\r ]") (const$Nothing)
 lexCommand = mkSingleLexLong (== '!') (/= '\n') (const$Just nop)
 lexComment = mkSingleLexLong (== '#') (/= '\n') (const$Nothing)
@@ -212,7 +283,7 @@ next :: Input -> (Token, Rest)
 next = ((sure .) . orUnkOp) `ta` findLex -- `sure`: ok because of `orUnkOp`
      where -- YYY: probably one too many 'sure/maybe' but anyway
        orUnkOp = flip maybe id
-               . Just . mapBoth (Just . opUnknown . head, drop 1)
+               . Just . mapBoth (Just . unimplemented . head, drop 1)
                . duple
        findLex = mayHead
                . dropWhile (maybe True (const False))
